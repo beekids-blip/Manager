@@ -47,9 +47,14 @@ details summary{cursor:pointer;font-size:13px;color:var(--mute)}
 <body>
 <header><h1>Bee Kids 簽到卡製作平台</h1><p>貼上新朋友資料 → 檢核 → 輸出含出血與裁切線的印刷 PDF</p></header>
 <main>
-<section>
+
+ <section>
 <h2><b>1</b>匯入新朋友資料</h2>
-<textarea id="paste" placeholder="在試算表選取「標題列＋資料列」，複製後貼在這裡（需包含「學生姓名」欄）"></textarea>
+<div class="row" style="margin-top:0;margin-bottom:10px">
+<label style="flex:1;min-width:240px">Google 試算表 API 網址（會自動記憶）<input id="gsurl" placeholder="https://script.google.com/macros/s/AKfycbz4pGZtoOPp8CtH7yHK8L6_LaTUWCzudvSxEjIK0D72xO5BCknTpM7gHKkF3G0T50UW/exec" style="width:100%"></label>
+<button class="primary" id="gsload" style="padding:7px 16px">從試算表同步</button>
+</div>
+<textarea id="paste" placeholder="或者直接在試算表選取「標題列＋資料列」，複製後貼在這裡（需包含「學生姓名」欄）"></textarea>
 <div class="row">
 <label>上傳 CSV<input type="file" id="file" accept=".csv,.tsv,.txt" style="width:200px"></label>
 <label>只處理此日期之後填表者<input id="since" placeholder="YYYY/MM/DD"></label>
@@ -116,10 +121,13 @@ const dateOf=s=>{const m=/(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(s||"");return m?ne
 const bday=s=>{const m=/(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(s||"");return m?`${m[1]}/${m[2].padStart(2,"0")}/${m[3].padStart(2,"0")}`:(s||"").trim()};
 
 function build(){
+ let sheetRows=null;
+function build(){
  const t=$("paste").value.trim();rows=[];
- if(!t){$("summary").textContent="尚無資料";draw();return}
- const tab=parseTable(t);const hi=tab.findIndex(r=>r.includes("學生姓名"));
- if(hi<0){$("summary").textContent="找不到「學生姓名」欄位，請連同標題列一起複製。";$("summary").className="msg warn";draw();return}
+ if(!t&&!sheetRows){$("summary").textContent="尚無資料";draw();return}
+ const tab=sheetRows||parseTable(t);
+ const hi=tab.findIndex(r=>r.includes("學生姓名"));
+ if(hi<0){$("summary").textContent="找不到「學生姓名」欄位，請確認標題列名稱。";$("summary").className="msg warn";draw();return}
  const h=tab[hi],ix=k=>h.indexOf(k),iN=ix("學生姓名"),iT=ix("時間戳記"),iB=ix("學生生日");
  const since=dateOf($("since").value+" ");let skipped=0,seen={};
  const month=$("month").value;let nxt=parseInt($("next").value)||0;
@@ -227,8 +235,27 @@ $("go").onclick=async()=>{
  btn.disabled=false};
 
 // ---------- 初始化 ----------
-$("file").onchange=async e=>{const f=e.target.files[0];if(f){$("paste").value=await f.text();build()}};
-["paste","since","month","next"].forEach(id=>$(id).addEventListener("input",()=>{if(id==="next")renumber();id==="next"?draw():build()}));
+$("gsurl").value=localStorage.getItem("bk_gsurl")||"";
+$("gsurl").oninput=e=>localStorage.setItem("bk_gsurl",e.target.value.trim());
+$("gsload").onclick=async()=>{
+ const url=$("gsurl").value.trim();
+ if(!url){$("summary").className="msg warn";$("summary").textContent="請先貼上 Google 試算表 API 網址";return}
+ const btn=$("gsload");btn.disabled=true;btn.textContent="讀取中…";
+ $("summary").className="msg";$("summary").textContent="正在連線讀取試算表資料…";
+ try{
+  const res=await fetch(url);
+  const json=await res.json();
+  if(json.error)throw new Error(json.error);
+  sheetRows=json.rows;$("paste").value="";build();
+ }catch(e){
+  $("summary").className="msg warn";$("summary").textContent="讀取試算表失敗："+(e.message||e);
+ }
+ btn.disabled=false;btn.textContent="從試算表同步";
+};
+
+$("file").onchange=async e=>{const f=e.target.files[0];if(f){sheetRows=null;$("paste").value=await f.text();build()}};
+$("paste").addEventListener("input",()=>{sheetRows=null;build()});
+["since","month","next"].forEach(id=>$(id).addEventListener("input",()=>{if(id==="next")renumber();id==="next"?draw():build()}));
 $("regapply").onclick=()=>{try{registry=JSON.parse($("regjson").value||"{}");saveReg();refreshReg();build()}catch(e){$("regmsg").textContent="紀錄格式錯誤"}};
 $("regclear").onclick=()=>{if(confirm("確定清空所有編號紀錄？")){registry={};saveReg();$("next").value="";refreshReg();build()}};
 const now=new Date(),p2=v=>String(v).padStart(2,"0");
