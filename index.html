@@ -151,11 +151,11 @@ function codeUpdate(){const m=($("month").value||"").replace("/","");rows.forEac
 function renumber(){let n=parseInt($("next").value)||0;rows.forEach(r=>{if(r.on)r.serial=n++})}
 
 // ---------- 繪製卡片 ----------
-function sampleColors(){const c=document.createElement("canvas");c.width=TW;c.height=TH;const x=c.getContext("2d");x.drawImage(tplImg,0,0);
+function sampleColors(){const c=document.createElement("canvas");c.width=TW;c.height=TH;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(tplImg,0,0);
  bg=[...x.getImageData(800,400,1,1).data].slice(0,3);bar=[...x.getImageData(800,560,1,1).data].slice(0,3)}
 async function renderCard(name,serial,month,bleedMm){
  await Promise.all([document.fonts.load(`900 90px ${NAMEFONT}`,name||"字"),document.fonts.load(`700 27px ${TXTFONT}`,"0123456789/ ")]).catch(()=>{});
- const W=TW*S,H=TH*S,c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
+ const W=TW*S,H=TH*S,c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d",{willReadFrequently:true});
  x.imageSmoothingQuality="high";x.drawImage(tplImg,0,0,W,H);
  const fill=(b,col)=>{x.fillStyle=`rgb(${col})`;x.fillRect(b[0]*S,b[1]*S,(b[2]-b[0])*S,(b[3]-b[1])*S)};
  // QR
@@ -176,14 +176,14 @@ async function renderCard(name,serial,month,bleedMm){
  put(month.replace("/",""),{w:700,f:TXTFONT},L.codeSize,L.codeR-w-L.gap,L.codeCY,"right",1);
  // 出血：以內側 3px 像素列向外延伸（避開範本最外圈的淡邊）
  const b=Math.round(bleedMm/25.4*300*S);if(b<=0)return c;const k=3*S,o=document.createElement("canvas");o.width=W+2*b;o.height=H+2*b;
- const y=o.getContext("2d");y.imageSmoothingEnabled=false;y.drawImage(c,b,b);
+ const y=o.getContext("2d",{willReadFrequently:true});y.imageSmoothingEnabled=false;y.drawImage(c,b,b);
  y.drawImage(c,k,0,1,H,0,b,b+k,H);y.drawImage(c,W-k-1,0,1,H,W+b-k,b,b+k,H);
  y.drawImage(c,0,k,W,1,b,0,W,b+k);y.drawImage(c,0,H-k-1,W,1,b,H+b-k,W,b+k);
  y.drawImage(c,k,k,1,1,0,0,b+k,b+k);y.drawImage(c,W-k-1,k,1,1,W+b-k,0,b+k,b+k);
  y.drawImage(c,k,H-k-1,1,1,0,H+b-k,b+k,b+k);y.drawImage(c,W-k-1,H-k-1,1,1,W+b-k,H+b-k,b+k,b+k);
  return o}
 let pvTok=0;
-async function preview(){const r=rows[sel],tok=++pvTok,pv=$("pv"),x=pv.getContext("2d");
+async function preview(){const r=rows[sel],tok=++pvTok,pv=$("pv"),x=pv.getContext("2d",{willReadFrequently:true});
  if(!r||!r.on||!r.serial||!tplImg){x.clearRect(0,0,pv.width,pv.height);if(tplImg)x.drawImage(tplImg,0,0);return}
  const c=await renderCard(r.name,r.serial,$("month").value,0);if(tok!==pvTok)return;x.drawImage(c,0,0,pv.width,pv.height)}
 
@@ -211,9 +211,15 @@ $("go").onclick=async()=>{
     files.push({name:`${pad(todo[i].serial)}_${safe(todo[i].name)}.pdf`,blob:doc.output("blob")})}
    if(files.length===1){filename=files[0].name;data=files[0].blob}
    else{const z=new JSZip();files.forEach(f=>z.file(f.name,f.blob));filename=`BeeKids_新朋友卡_${month.replace("/","")}.zip`;data=await z.generateAsync({type:"blob"})}}
-  const dl=await claude.use("downloads");
-  if(!dl){msg.className="msg warn";msg.textContent="此環境無法下載檔案，請改用瀏覽器開啟。";btn.disabled=false;return}
-  await dl.save({filename,data});
+  if(typeof claude!=="undefined"&&claude.use){
+   const dl=await claude.use("downloads");
+   if(!dl){msg.className="msg warn";msg.textContent="此環境無法下載檔案，請改用瀏覽器開啟。";btn.disabled=false;return}
+   await dl.save({filename,data});
+  }else{
+   const url=URL.createObjectURL(data),a=document.createElement("a");
+   a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
   todo.forEach(r=>registry[r.key]=r.serial);saveReg();refreshReg();
   msg.className="msg ok";msg.textContent=`已輸出 ${todo.length} 張（${filename}），編號已記錄。頁面 ${PW}×${PH}mm，出血 ${bl}mm${marks?"，含裁切線":""}。`;
   $("next").value=nextSerial();$("paste").value="";build();
