@@ -158,42 +158,161 @@ function draw(){
 function codeUpdate(){const m=($("month").value||"").replace("/","");rows.forEach(r=>{if(r.codeEl)r.codeEl.textContent=r.on&&r.serial?`${m} ${String(r.serial).padStart(4,"0")}`:"-"})}
 function renumber(){let n=parseInt($("next").value)||0;rows.forEach(r=>{if(r.on)r.serial=n++})}
 
-// ---------- 繪製卡片 ----------
-function sampleColors(){const c=document.createElement("canvas");c.width=TW;c.height=TH;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(tplImg,0,0);
- bg=[...x.getImageData(800,400,1,1).data].slice(0,3);bar=[...x.getImageData(800,560,1,1).data].slice(0,3)}
-async function renderCard(name,serial,month,bleedMm){
- await Promise.all([document.fonts.load(`900 90px ${NAMEFONT}`,name||"字"),document.fonts.load(`700 27px ${TXTFONT}`,"0123456789/ ")]).catch(()=>{});
- const W=TW*S,H=TH*S,c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d",{willReadFrequently:true});
- x.imageSmoothingQuality="high";x.drawImage(tplImg,0,0,W,H);
- const fill=(b,col)=>{x.fillStyle=`rgb(${col})`;x.fillRect(b[0]*S,b[1]*S,(b[2]-b[0])*S,(b[3]-b[1])*S)};
- // QR
- const [qx0,qy0,qx1,qy1]=L.qr;x.fillStyle="#fff";x.fillRect(qx0*S,qy0*S,(qx1-qx0)*S,(qy1-qy0)*S);
- const q=qrcode(0,"M");q.addData(String(serial),"Numeric");q.make();const n=q.getModuleCount(),mod=Math.floor((qx1-qx0)*S/(n+3)),
-  ox=qx0*S+Math.floor(((qx1-qx0)*S-mod*n)/2),oy=qy0*S+Math.floor(((qy1-qy0)*S-mod*n)/2);
- x.fillStyle="#000";for(let r=0;r<n;r++)for(let k=0;k<n;k++)if(q.isDark(r,k))x.fillRect(ox+k*mod,oy+r*mod,mod,mod);
- const put=(txt,font,px,ax,cy,align,stroke)=>{x.font=`${font.w} ${px*S}px ${font.f}`;x.textAlign=align;x.textBaseline="alphabetic";
-  const m=x.measureText(txt),y=cy*S+(m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2;x.fillStyle="#000";x.fillText(txt,ax*S,y);
-  if(stroke){x.lineWidth=stroke;x.strokeStyle="#000";x.strokeText(txt,ax*S,y)}return m.width/S};
- // 姓名
- fill(L.nameE,bg);let px=L.nameSize;x.font=`900 ${px*S}px ${NAMEFONT}`;
- while(x.measureText(name).width>L.nameW*S&&px>20){px-=2;x.font=`900 ${px*S}px ${NAMEFONT}`}
- put(name,{w:900,f:NAMEFONT},px,L.nameCX,L.nameCY,"center",0);
- // 月份與編號
- fill(L.dateE,bg);put(month,{w:700,f:TXTFONT},L.dateSize,L.dateX,L.dateCY,"left",1);
- fill(L.codeE,bar);const sn=String(serial).padStart(4,"0"),w=put(sn,{w:700,f:TXTFONT},L.codeSize,L.codeR,L.codeCY,"right",1);
- put(month.replace("/",""),{w:700,f:TXTFONT},L.codeSize,L.codeR-w-L.gap,L.codeCY,"right",1);
- // 出血：以內側 3px 像素列向外延伸（避開範本最外圈的淡邊）
- const b=Math.round(bleedMm/25.4*300*S);if(b<=0)return c;const k=3*S,o=document.createElement("canvas");o.width=W+2*b;o.height=H+2*b;
- const y=o.getContext("2d",{willReadFrequently:true});y.imageSmoothingEnabled=false;y.drawImage(c,b,b);
- y.drawImage(c,k,0,1,H,0,b,b+k,H);y.drawImage(c,W-k-1,0,1,H,W+b-k,b,b+k,H);
- y.drawImage(c,0,k,W,1,b,0,W,b+k);y.drawImage(c,0,H-k-1,W,1,b,H+b-k,W,b+k);
- y.drawImage(c,k,k,1,1,0,0,b+k,b+k);y.drawImage(c,W-k-1,k,1,1,W+b-k,0,b+k,b+k);
- y.drawImage(c,k,H-k-1,1,1,0,H+b-k,b+k,b+k);y.drawImage(c,W-k-1,H-k-1,1,1,W+b-k,H+b-k,b+k,b+k);
- return o}
-let pvTok=0;
-async function preview(){const r=rows[sel],tok=++pvTok,pv=$("pv"),x=pv.getContext("2d",{willReadFrequently:true});
- if(!r||!r.on||!r.serial||!tplImg){x.clearRect(0,0,pv.width,pv.height);if(tplImg)x.drawImage(tplImg,0,0);return}
- const c=await renderCard(r.name,r.serial,$("month").value,0);if(tok!==pvTok)return;x.drawImage(c,0,0,pv.width,pv.height)}
+async function renderCard(name, serial, month, bleedMm = 0, opts = {}) {
+  const { drawCropMarks = true, cropLenMm = 2, cropOffsetMm = 0.5 } = opts;
+  await Promise.all([
+    document.fonts.load(`900 90px ${NAMEFONT}`, name || "字"),
+    document.fonts.load(`700 27px ${TXTFONT}`, "0123456789/ ")
+  ]).catch(() => {});
+
+  const W = TW * S, H = TH * S;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.imageSmoothingQuality = "high";
+  x.drawImage(tplImg, 0, 0, W, H);
+
+  const fill = (b, col) => {
+    x.fillStyle = `rgb(${col})`;
+    x.fillRect(b[0] * S, b[1] * S, (b[2] - b[0]) * S, (b[3] - b[1]) * S);
+  };
+
+  // QR
+  const [qx0, qy0, qx1, qy1] = L.qr;
+  x.fillStyle = "#fff";
+  x.fillRect(qx0 * S, qy0 * S, (qx1 - qx0) * S, (qy1 - qy0) * S);
+  const q = qrcode(0, "M");
+  q.addData(String(serial), "Numeric");
+  q.make();
+  const n = q.getModuleCount();
+  const mod = Math.floor((qx1 - qx0) * S / (n + 3));
+  const ox = qx0 * S + Math.floor(((qx1 - qx0) * S - mod * n) / 2);
+  const oy = qy0 * S + Math.floor(((qy1 - qy0) * S - mod * n) / 2);
+  x.fillStyle = "#000";
+  for (let r = 0; r < n; r++) {
+    for (let k = 0; k < n; k++) {
+      if (q.isDark(r, k)) x.fillRect(ox + k * mod, oy + r * mod, mod, mod);
+    }
+  }
+
+  const put = (txt, font, px, ax, cy, align, stroke) => {
+    x.font = `${font.w} ${px * S}px ${font.f}`;
+    x.textAlign = align;
+    x.textBaseline = "alphabetic";
+    const m = x.measureText(txt);
+    const y = cy * S + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+    x.fillStyle = "#000";
+    x.fillText(txt, ax * S, y);
+    if (stroke) {
+      x.lineWidth = stroke * S;
+      x.strokeStyle = "#000";
+      x.strokeText(txt, ax * S, y);
+    }
+    return m.width / S;
+  };
+
+  // 姓名
+  fill(L.nameE, bg);
+  let px = L.nameSize;
+  x.font = `900 ${px * S}px ${NAMEFONT}`;
+  while (x.measureText(name).width > L.nameW * S && px > 20) {
+    px -= 2;
+    x.font = `900 ${px * S}px ${NAMEFONT}`;
+  }
+  put(name, { w: 900, f: NAMEFONT }, px, L.nameCX, L.nameCY, "center", 0);
+
+  // 月份與編號
+  fill(L.dateE, bg);
+  put(month, { w: 700, f: TXTFONT }, L.dateSize, L.dateX, L.dateCY, "left", 1);
+  fill(L.codeE, bar);
+  const sn = String(serial).padStart(4, "0");
+  const w = put(sn, { w: 700, f: TXTFONT }, L.codeSize, L.codeR, L.codeCY, "right", 1);
+  put(month.replace("/", ""), { w: 700, f: TXTFONT }, L.codeSize, L.codeR - w - L.gap, L.codeCY, "right", 1);
+
+  const mmToPx = (mm) => Math.round((mm / 25.4) * 300 * S);
+  const b = Math.max(0, mmToPx(bleedMm));
+  const cropLen = Math.max(6 * S, mmToPx(cropLenMm));
+  const cropGap = Math.max(0, mmToPx(cropOffsetMm));
+
+  if (b <= 0 && !drawCropMarks) return c;
+
+  const padX = Math.max(b, drawCropMarks ? cropLen + cropGap + 2 * S : b);
+  const padY = Math.max(b, drawCropMarks ? cropLen + cropGap + 2 * S : b);
+
+  const o = document.createElement("canvas");
+  o.width = W + padX * 2;
+  o.height = H + padY * 2;
+  const y = o.getContext("2d", { willReadFrequently: true });
+
+  // 底色先鋪滿避免邊角透明
+  y.fillStyle = "#fff";
+  y.fillRect(0, 0, o.width, o.height);
+
+  // 繪製卡片本體
+  y.drawImage(c, padX, padY);
+
+  // 向外延伸出血（b > 0 時）
+  if (b > 0) {
+    const k = 3 * S;
+    y.save();
+    y.imageSmoothingEnabled = false;
+    // 左、右、上、下
+    y.drawImage(c, k, 0, 1, H, padX - b, padY, b, H);
+    y.drawImage(c, W - k - 1, 0, 1, H, padX + W, padY, b, H);
+    y.drawImage(c, 0, k, W, 1, padX, padY - b, W, b);
+    y.drawImage(c, 0, H - k - 1, W, 1, padX, padY + H, W, b);
+    // 四角
+    y.drawImage(c, k, k, 1, 1, padX - b, padY - b, b, b);
+    y.drawImage(c, W - k - 1, k, 1, 1, padX + W, padY - b, b, b);
+    y.drawImage(c, k, H - k - 1, 1, 1, padX - b, padY + H, b, b);
+    y.drawImage(c, W - k - 1, H - k - 1, 1, 1, padX + W, padY + H, b, b);
+    y.restore();
+  }
+
+  // 繪製四角裁切線（位於卡片實際裁切邊緣 W x H 的四個角落外側）
+  if (drawCropMarks) {
+    const x0 = padX;
+    const y0 = padY;
+    const x1 = padX + W;
+    const y1 = padY + H;
+    const startOff = Math.max(b, cropGap); // 從出血外緣或裁切邊往外畫
+
+    y.save();
+    y.strokeStyle = "#000";
+    y.lineWidth = Math.max(1, 0.75 * S);
+    y.beginPath();
+
+    // 左上角
+    y.moveTo(x0 - startOff - cropLen, y0);
+    y.lineTo(x0 - startOff, y0);
+    y.moveTo(x0, y0 - startOff - cropLen);
+    y.lineTo(x0, y0 - startOff);
+
+    // 右上角
+    y.moveTo(x1 + startOff, y0);
+    y.lineTo(x1 + startOff + cropLen, y0);
+    y.moveTo(x1, y0 - startOff - cropLen);
+    y.lineTo(x1, y0 - startOff);
+
+    // 左下角
+    y.moveTo(x0 - startOff - cropLen, y1);
+    y.lineTo(x0 - startOff, y1);
+    y.moveTo(x0, y1 + startOff);
+    y.lineTo(x0, y1 + startOff + cropLen);
+
+    // 右下角
+    y.moveTo(x1 + startOff, y1);
+    y.lineTo(x1 + startOff + cropLen, y1);
+    y.moveTo(x1, y1 + startOff);
+    y.lineTo(x1, y1 + startOff + cropLen);
+
+    y.stroke();
+    y.restore();
+  }
+
+  return o;
+}
 
 // ---------- 輸出 PDF ----------
 $("go").onclick=async()=>{
